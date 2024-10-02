@@ -11,8 +11,6 @@
 
 with A0B.Callbacks.Generic_Non_Dispatching;
 
---  with BBF.Awaits;
-
 package body A0B.PCA9685.Drivers is
 
    OSC_CLOCK : constant := 25_000_000;
@@ -76,7 +74,7 @@ package body A0B.PCA9685.Drivers is
       Reserved_7 at 0 range 7 .. 7;
    end record;
 
-   type Mode_Register is record
+   type MODE_Register is record
       MODE1 : MODE1_Register;
       MODE2 : MODE2_Register;
    end record;
@@ -87,20 +85,22 @@ package body A0B.PCA9685.Drivers is
      new A0B.Callbacks.Generic_Non_Dispatching
            (PCA9685_Controller_Driver, On_Completed);
 
-   function Probe_Synchronous
-     (Self : in out PCA9685_Controller_Driver'Class) return Boolean;
+   procedure On_Initialization
+     (Self : in out PCA9685_Controller_Driver'Class);
 
-   procedure Write_Synchronous
-     (Self     : in out PCA9685_Controller_Driver'Class;
-      Register : A0B.I2C.Device_Drivers_8.Register_Address;
-      Buffer   : A0B.I2C.Unsigned_8_Array;
-      Success  : in out Boolean);
+   procedure On_Configuration
+     (Self : in out PCA9685_Controller_Driver'Class);
 
-   procedure Write_Synchronous
-     (Self     : in out PCA9685_Controller_Driver'Class;
-      Register : A0B.I2C.Device_Drivers_8.Register_Address;
-      Buffer   : A0B.Types.Unsigned_8;
-      Success  : in out Boolean);
+   package On_Initialization_Callbacks is
+     new A0B.Callbacks.Generic_Non_Dispatching
+           (PCA9685_Controller_Driver, On_Initialization);
+
+   package On_Configuration_Callbacks is
+     new A0B.Callbacks.Generic_Non_Dispatching
+           (PCA9685_Controller_Driver, On_Configuration);
+
+   --  function Probe_Synchronous
+   --    (Self : in out PCA9685_Controller_Driver'Class) return Boolean;
 
    ------------------------
    -- Commit_Transaction --
@@ -125,9 +125,9 @@ package body A0B.PCA9685.Drivers is
                On_Completed => On_Completed_Callbacks.Create_Callback (Self),
                Success      => Success);
 
-            --  if not Success then
-            --     raise Program_Error;
-            --  end if;
+            if not Success then
+               raise Program_Error;
+            end if;
          end;
       end if;
    end Commit_Transaction;
@@ -139,6 +139,7 @@ package body A0B.PCA9685.Drivers is
    procedure Configure
      (Self      : in out PCA9685_Controller_Driver'Class;
       Frequency : A0B.Types.Unsigned_16;
+      Finished  : A0B.Callbacks.Callback;
       Success   : in out Boolean)
    is
       use type A0B.Types.Unsigned_16;
@@ -148,47 +149,11 @@ package body A0B.PCA9685.Drivers is
         with Import, Address => MODE'Address;
 
    begin
-      if not Success or not Self.Initialized then
+      if not Success or Self.State /= Ready then
          Success := False;
 
          return;
       end if;
-
-      --  Configure PCA9685 to be in sleep state. Sleep state is necessary
-      --  to write PRE_SCALE register.
-      --
-      --  XXX Should some parameters be configurable?
-
-      MODE.MODE1 :=
-        (AI      => True,    --  Default: FALSE
-         --  Enable autoincrement to write many registers by single I2C bus
-         --  write operation.
-         EXTCLK  => False,   --  Default: FALSE
-         SLEEP   => True,    --  Default: TRUE
-         RESTART => False,   --  Default: FALSE
-         SUB1    => False,   --  Default: FALSE
-         SUB2    => False,   --  Default: FALSE
-         SUB3    => False,   --  Default: FALSE
-         ALLCALL => False);  --  Default: TRUE
-         --  ALLCALL address is not used, but may conflict with another device
-         --  on I2C bus.
-
-      MODE.MODE2 :=
-        (OUTDRV     => True,    --  Default: TRUE
-         OUTNE      => Off,     --  Default: OFF
-         OCH        => False,   --  Default: FALSE
-         INVRT      => False,   --  Default: FALSE
-         Reserved_5 => False,   --  Default: FALSE
-         Reserved_6 => False,   --  Default: FALSE
-         Reserved_7 => False);  --  Default: FALSE
-
-      Self.Write_Synchronous (MODE1_Address, MODE_Buffer, Success);
-
-      if not Success then
-         return;
-      end if;
-
-      --  Configure PRE_SCALE register.
 
       Self.Scale :=
         A0B.Types.Unsigned_8
@@ -196,20 +161,11 @@ package body A0B.PCA9685.Drivers is
       --  Equation (1) in 7.3.5 assume use of real numbers. Modified version is
       --  used to produce same result with integer operations only.
 
-      Self.Write_Synchronous (PRE_SCALE_Address, Self.Scale, Success);
+      Self.Finished := Finished;
 
-      if not Success then
-         return;
-      end if;
-
-      --  Wakeup controller.
-
-      MODE.MODE1.SLEEP := False;
-      Self.Write_Synchronous (MODE1_Address, MODE_Buffer (0 .. 0), Success);
-
-      if not Success then
-         return;
-      end if;
+      Self.On_Configuration;
+      --  Call configuration callback to start device configuration.
+      --  XXX Can't be done this way, because might call callback inside.
    end Configure;
 
    ----------------
@@ -217,84 +173,23 @@ package body A0B.PCA9685.Drivers is
    ----------------
 
    procedure Initialize
-     (Self    : in out PCA9685_Controller_Driver'Class;
-      Success : in out Boolean) is
+     (Self     : in out PCA9685_Controller_Driver'Class;
+      Finished : A0B.Callbacks.Callback;
+      Success  : in out Boolean) is
    begin
-      Self.Initialized := False;
+      if not Success or Self.State /= Initial then
+         Success := False;
 
-      --  Do controller's probe.
-
-      Success := Self.Probe_Synchronous;
-
-      if not Success then
          return;
       end if;
 
-      --  Shutdown all channels. It resets RESTART mode too.
-      --
-      --  It is down by setting of bit 4 in ALL_LED_OFF_H register.
+      Self.Buffer   := (others => <>);
+      Self.Status   := (State => A0B.I2C.Success, others => <>);
+      Self.Finished := Finished;
 
-      declare
-         R : constant Registers.LED_OFF_H_Register :=
-           (Count => 0, Off => True, others => False);
-         B : A0B.I2C.Unsigned_8_Array (0 .. 0) with Address => R'Address;
-
-      begin
-         Self.Write_Synchronous (ALL_LED_OFF_H_Address, B, Success);
-
-         if not Success then
-            return;
-         end if;
-      end;
-
-      --  Configure PCA9685 to almost default configuration and push into the
-      --  sleep state. Sleep state is necessary be able to write PRE_SCALE
-      --  register.
-      --
-      --  Difference from the default configuration:
-      --   - AI (autoincrement) is enabled
-      --   - ALLCALL mode is disable
-      --   - PRE_SCALE register is not changed (it will be set by configuration
-      --     procedure)
-
-      declare
-         MODE        : MODE_Register;
-         MODE_Buffer : A0B.I2C.Unsigned_8_Array (0 .. 1)
-           with Address => MODE'Address;
-
-      begin
-         MODE.MODE1 :=
-           (AI      => True,    --  Default: FALSE
-            --  Enable autoincrement to write many registers by single I2C bus
-            --  write operation.
-            EXTCLK  => False,   --  Default: FALSE
-            SLEEP   => True,    --  Default: TRUE
-            RESTART => False,   --  Default: FALSE
-            SUB1    => False,   --  Default: FALSE
-            SUB2    => False,   --  Default: FALSE
-            SUB3    => False,   --  Default: FALSE
-            ALLCALL => False);  --  Default: TRUE
-           --  ALLCALL address is not used, but may conflict with another
-           --  device I2C bus.
-
-         MODE.MODE2 :=
-           (OUTDRV     => True,    --  Default: TRUE
-            OUTNE      => Off,     --  Default: OFF
-            OCH        => False,   --  Default: FALSE
-            INVRT      => False,   --  Default: FALSE
-            Reserved_5 => False,   --  Default: FALSE
-            Reserved_6 => False,   --  Default: FALSE
-            Reserved_7 => False);  --  Default: FALSE
-
-         Self.Write_Synchronous (MODE1_Address, MODE_Buffer, Success);
-
-         if not Success then
-            return;
-         end if;
-      end;
-
-      Self.Buffer      := (others => <>);
-      Self.Initialized := True;
+      Self.On_Initialization;
+      --  Call initialization callback to start device initialization.
+      --  XXX Can't be done this way, because might call callback inside.
    end Initialize;
 
    ---------
@@ -445,6 +340,291 @@ package body A0B.PCA9685.Drivers is
       null;
    end On_Completed;
 
+   ----------------------
+   -- On_Configuration --
+   ----------------------
+
+   procedure On_Configuration
+     (Self : in out PCA9685_Controller_Driver'Class)
+   is
+      use type A0B.I2C.Transfer_State;
+
+      Success : Boolean := True;
+
+   begin
+      if Self.Status.State /= A0B.I2C.Success then
+         raise Program_Error;
+
+         --  return;
+      end if;
+
+      case Self.State is
+         when Ready =>
+            --  Configure PCA9685 to be in sleep state. Sleep state is necessary
+            --  to write PRE_SCALE register.
+            --
+            --  XXX Should some parameters be configurable?
+
+            declare
+               MODE : MODE_Register
+                 with Import, Address => Self.Aux_Buffer'Address;
+
+            begin
+               MODE.MODE1 :=
+                 (AI      => True,    --  Default: FALSE
+                  --  Enable autoincrement to write many registers by single
+                  --  I2C bus write operation.
+                  EXTCLK  => False,   --  Default: FALSE
+                  SLEEP   => True,    --  Default: TRUE
+                  RESTART => False,   --  Default: FALSE
+                  SUB1    => False,   --  Default: FALSE
+                  SUB2    => False,   --  Default: FALSE
+                  SUB3    => False,   --  Default: FALSE
+                  ALLCALL => False);  --  Default: TRUE
+                  --  ALLCALL address is not used, but may conflict with
+                  --  another device on I2C bus.
+
+               MODE.MODE2 :=
+                 (OUTDRV     => True,    --  Default: TRUE
+                  OUTNE      => Off,     --  Default: OFF
+                  OCH        => False,   --  Default: FALSE
+                  INVRT      => False,   --  Default: FALSE
+                  Reserved_5 => False,   --  Default: FALSE
+                  Reserved_6 => False,   --  Default: FALSE
+                  Reserved_7 => False);  --  Default: FALSE
+
+               Self.Write
+                 (Address      => MODE1_Address,
+                  Buffer       => Self.Aux_Buffer (0 .. 1),
+                  Status       => Self.Status,
+                  On_Completed =>
+                    On_Configuration_Callbacks.Create_Callback (Self),
+                  Success      => Success);
+
+               Self.State := Configuration_MODE;
+            end;
+
+         when Configuration_MODE =>
+            --  Configure PRE_SCALE register.
+
+            declare
+               PRESCALE : A0B.Types.Unsigned_8
+                 with Import, Address => Self.Aux_Buffer'Address;
+
+            begin
+               PRESCALE := Self.Scale;
+
+               Self.Write
+                 (Address      => PRE_SCALE_Address,
+                  Buffer       => Self.Aux_Buffer (0 .. 1),
+                  Status       => Self.Status,
+                  On_Completed =>
+                    On_Configuration_Callbacks.Create_Callback (Self),
+                  Success      => Success);
+
+               Self.State := Configuration_PRESCALE;
+            end;
+
+         when Configuration_PRESCALE =>
+            --  Wakeup controller.
+
+            declare
+               MODE1 : MODE1_Register
+                 with Import, Address => Self.Aux_Buffer'Address;
+
+            begin
+               --  Change SLEEP to False.
+
+               MODE1 :=
+                 (AI      => True,    --  Default: FALSE
+                  --  Enable autoincrement to write many registers by single
+                  --  I2C bus write operation.
+                  EXTCLK  => False,   --  Default: FALSE
+                  SLEEP   => False,   --  Default: TRUE
+                  RESTART => False,   --  Default: FALSE
+                  SUB1    => False,   --  Default: FALSE
+                  SUB2    => False,   --  Default: FALSE
+                  SUB3    => False,   --  Default: FALSE
+                  ALLCALL => False);  --  Default: TRUE
+                  --  ALLCALL address is not used, but may conflict with
+                  --  another device on I2C bus.
+
+               Self.Write
+                 (Address      => MODE1_Address,
+                  Buffer       => Self.Aux_Buffer (0 .. 0),
+                  Status       => Self.Status,
+                  On_Completed =>
+                    On_Configuration_Callbacks.Create_Callback (Self),
+                  Success      => Success);
+
+               Self.State := Configuration_WAKEUP;
+            end;
+
+         when Configuration_WAKEUP =>
+            Self.State := Ready;
+
+            A0B.Callbacks.Emit_Once (Self.Finished);
+
+         when others =>
+            raise Program_Error;
+      end case;
+
+      --  Handle transmission failure.
+
+      if not Success then
+         raise Program_Error;
+
+         --  return;
+      end if;
+   end On_Configuration;
+
+   -----------------------
+   -- On_Initialization --
+   -----------------------
+
+   procedure On_Initialization
+     (Self : in out PCA9685_Controller_Driver'Class)
+   is
+      use type A0B.I2C.Transfer_State;
+
+      Success : Boolean := True;
+
+   begin
+      if Self.Status.State /= A0B.I2C.Success then
+         raise Program_Error;
+
+         --  return;
+      end if;
+
+      case Self.State is
+   --     --  Do controller's probe.
+   --     --  XXX Not implemented in A0B yet
+   --
+   --     --  Success := Self.Probe_Synchronous;
+   --     --
+   --     --  if not Success then
+   --     --     return;
+   --     --  end if;
+
+         when Initial =>
+            --  Shutdown all channels. It resets RESTART mode too.
+            --
+            --  It is down by setting of bit 4 in ALL_LED_OFF_H register.
+
+            declare
+               R : Registers.LED_OFF_H_Register
+                 with Import, Address => Self.Aux_Buffer'Address;
+
+            begin
+               R := (Count => 0, Off => True, others => False);
+
+               Self.Write
+                 (Address      => ALL_LED_OFF_H_Address,
+                  Buffer       => Self.Aux_Buffer (0 .. 0),
+                  Status       => Self.Status,
+                  On_Completed =>
+                    On_Initialization_Callbacks.Create_Callback (Self),
+                  Success      => Success);
+
+               Self.State := Initialization_Shutdown_All;
+            end;
+
+         when Initialization_Shutdown_All =>
+            --  Configure PCA9685 to almost default configuration and push
+            --  into the sleep state. Sleep state is necessary be able to
+            --  write PRE_SCALE register.
+            --
+            --  Difference from the default configuration:
+            --   - AI (autoincrement) is enabled
+            --   - ALLCALL mode is disable
+            --   - PRE_SCALE register is not changed (it will be set by
+            --     configuration procedure)
+
+            declare
+               MODE : MODE_Register
+                 with Import, Address => Self.Aux_Buffer'Address;
+
+            begin
+               MODE.MODE1 :=
+                 (AI      => True,    --  Default: FALSE
+                  --  Enable autoincrement to write many registers by single
+                  --  I2C bus write operation.
+                  EXTCLK  => False,   --  Default: FALSE
+                  SLEEP   => True,    --  Default: TRUE
+                  RESTART => False,   --  Default: FALSE
+                  SUB1    => False,   --  Default: FALSE
+                  SUB2    => False,   --  Default: FALSE
+                  SUB3    => False,   --  Default: FALSE
+                  ALLCALL => False);  --  Default: TRUE
+                  --  ALLCALL address is not used, because it may conflict with
+                  --  another device I2C bus.
+
+               MODE.MODE2 :=
+                 (OUTDRV     => True,    --  Default: TRUE
+                  OUTNE      => Off,     --  Default: OFF
+                  OCH        => False,   --  Default: FALSE
+                  INVRT      => False,   --  Default: FALSE
+                  Reserved_5 => False,   --  Default: FALSE
+                  Reserved_6 => False,   --  Default: FALSE
+                  Reserved_7 => False);  --  Default: FALSE
+
+               Self.Write
+                 (Address      => MODE1_Address,
+                  Buffer       => Self.Aux_Buffer (0 .. 1),
+                  Status       => Self.Status,
+                  On_Completed =>
+                    On_Initialization_Callbacks.Create_Callback (Self),
+                  Success      => Success);
+
+               Self.State := Initialization_MODE;
+            end;
+
+         when Initialization_MODE =>
+            Self.State := Ready;
+
+            A0B.Callbacks.Emit_Once (Self.Finished);
+
+         when others =>
+            raise Program_Error;
+      end case;
+
+      --  Handle transmission failure.
+
+      if not Success then
+         raise Program_Error;
+
+         --  return;
+      end if;
+   end On_Initialization;
+
+   -----------------------
+   -- Probe_Synchronous --
+   -----------------------
+
+   --  function Probe_Synchronous
+   --    (Self : in out PCA9685_Controller_Driver'Class) return Boolean
+   --  is
+   --     --  Buffer  : A0B.I2C.Unsigned_8_Array (1 .. 0);
+   --     --  Status  : aliased A0B.I2C.Device_Drivers_8.Transaction_Status;
+   --     --  Await   : aliased BBF.Awaits.Await;
+   --     Success : Boolean := True;
+   --
+   --  begin
+   --     --  Self.Write
+   --     --    (Buffer       => Buffer,
+   --     --     Status       => Status,
+   --     --     On_Completed => BBF.Awaits.Create_Callback (Await),
+   --     --     Success      => Success);
+   --     --
+   --     --  if not Success then
+   --     --     return;
+   --     --  end if;
+   --     --
+   --     --  BBF.Awaits.Suspend_Till_Callback (Await);
+   --
+   --     return Success;
+   --  end Probe_Synchronous;
+
    ---------
    -- Set --
    ---------
@@ -480,9 +660,9 @@ package body A0B.PCA9685.Drivers is
               On_Completed_Callbacks.Create_Callback (Self.Controller.all),
             Success      => Success);
 
-         --  if not Success then
-         --     raise Program_Error;
-         --  end if;
+         if not Success then
+            raise Program_Error;
+         end if;
       end if;
    end Set;
 
@@ -516,99 +696,5 @@ package body A0B.PCA9685.Drivers is
    begin
       return 1.0 / OSC_CLOCK * (Integer (Self.Scale) + 1);
    end Tick_Duration;
-
-   -----------------------
-   -- Probe_Synchronous --
-   -----------------------
-
-   function Probe_Synchronous
-     (Self : in out PCA9685_Controller_Driver'Class) return Boolean
-   is
-      --  Buffer  : A0B.I2C.Unsigned_8_Array (1 .. 0);
-      --  Status  : aliased A0B.I2C.Device_Drivers_8.Transaction_Status;
-      --  Await   : aliased BBF.Awaits.Await;
-      Success : Boolean := True;
-
-   begin
-      --  Self.Write
-      --    (Buffer       => Buffer,
-      --     Status       => Status,
-      --     On_Completed => BBF.Awaits.Create_Callback (Await),
-      --     Success      => Success);
-      --
-      --  if not Success then
-      --     return;
-      --  end if;
-      --
-      --  BBF.Awaits.Suspend_Till_Callback (Await);
-
-      return Success;
-   end Probe_Synchronous;
-
-   -----------------------
-   -- Write_Synchronous --
-   -----------------------
-
-   procedure Write_Synchronous
-     (Self     : in out PCA9685_Controller_Driver'Class;
-      Register : A0B.I2C.Device_Drivers_8.Register_Address;
-      Buffer   : A0B.Types.Unsigned_8;
-      Success  : in out Boolean)
-   is
-      Write_Buffer : A0B.I2C.Unsigned_8_Array (0 .. 0);
-      Status       : aliased A0B.I2C.Device_Drivers_8.Transaction_Status;
-      --  Await        : aliased BBF.Awaits.Await;
-
-   begin
-      Write_Buffer (0) := Buffer;
-
-      Self.Write
-        (Address      => Register,
-         Buffer       => Write_Buffer,
-         Status       => Status,
-         On_Completed => BBF.Awaits.Create_Callback (Await),
-         Success      => Success);
-
-      if not Success then
-         return;
-      end if;
-
-      --  BBF.Awaits.Suspend_Till_Callback (Await);
-   end Write_Synchronous;
-
-   -----------------------
-   -- Write_Synchronous --
-   -----------------------
-
-   procedure Write_Synchronous
-     (Self     : in out PCA9685_Controller_Driver'Class;
-      Register : A0B.I2C.Device_Drivers_8.Register_Address;
-      Buffer   : A0B.I2C.Unsigned_8_Array;
-      Success  : in out Boolean)
-   is
-      use type A0B.Types.Unsigned_32;
-      use type A0B.I2C.Transfer_State;
-
-      Status : aliased A0B.I2C.Device_Drivers_8.Transaction_Status;
-      Await  : aliased BBF.Awaits.Await;
-
-   begin
-      Self.Write
-        (Address      => Register,
-         Buffer       => Buffer,
-         Status       => Status,
-         On_Completed => BBF.Awaits.Create_Callback (Await),
-         Success      => Success);
-
-      if not Success then
-         return;
-      end if;
-
-      BBF.Awaits.Suspend_Till_Callback (Await);
-
-      if Status.State /= A0B.I2C.Success then
-         Success := False;
-      end if;
-   end Write_Synchronous;
 
 end A0B.PCA9685.Drivers;

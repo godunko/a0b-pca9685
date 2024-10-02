@@ -7,6 +7,7 @@
 --  Implementation of controller and channel drivers of PCA9685: 16-channel,
 --  12-bit PWM Fm+ I2C-bus LED controller.
 
+with A0B.Callbacks;
 with A0B.I2C.Device_Drivers_8;
 with A0B.Types;
 
@@ -85,22 +86,19 @@ package A0B.PCA9685.Drivers is
    overriding function Tick_Duration
      (Self : PCA9685_Channel_Driver) return A0B.PCA9685.Tick_Duration_Type;
 
+   type State_Kind is
+     (Initial,
+      Initialization_Shutdown_All,
+      Initialization_MODE,
+      Configuration_MODE,
+      Configuration_PRESCALE,
+      Configuration_WAKEUP,
+      Ready);
+
    type PCA9685_Controller_Driver
      is limited new A0B.I2C.Device_Drivers_8.I2C_Device_Driver
        and A0B.PCA9685.PCA9685_Controller with
    record
-      Buffer      : Registers.LED_Register_Buffer;
-      --  Buffer to prepare values to be send to controller's registers.
-
-      Initialized : Boolean := False;
-      --  Controller has been initialized.
-
-      Transaction : Boolean := False;
-      --  Transactional mode control.
-
-      Scale       : A0B.Types.Unsigned_8 := 3;
-      --  Internal frequency scale factor
-
       Channel_00  : aliased
         PCA9685_Channel_Driver (PCA9685_Controller_Driver'Unchecked_Access, 0);
       Channel_01  : aliased
@@ -134,13 +132,31 @@ package A0B.PCA9685.Drivers is
       Channel_15  : aliased
         PCA9685_Channel_Driver (PCA9685_Controller_Driver'Unchecked_Access, 15);
 
+      Buffer      : Registers.LED_Register_Buffer;
+      --  Buffer to prepare values to be send to controller's registers.
+
+      Aux_Buffer  : aliased A0B.I2C.Unsigned_8_Array (0 .. 1);
+      --  Auxiliary buffer for initialization and configuration,
+
+      State      : State_Kind := Initial;
+      --  Current state of the driver
+
+      Transaction : Boolean := False;
+      --  Transactional mode control.
+
+      Scale       : A0B.Types.Unsigned_8 := 3;
+      --  Internal frequency scale factor
+
       Status      : aliased A0B.I2C.Device_Drivers_8.Transaction_Status;
+
+      Finished    : A0B.Callbacks.Callback;
    end record
      with Preelaborable_Initialization;
 
    procedure Initialize
-     (Self    : in out PCA9685_Controller_Driver'Class;
-      Success : in out Boolean);
+     (Self     : in out PCA9685_Controller_Driver'Class;
+      Finished : A0B.Callbacks.Callback;
+      Success  : in out Boolean);
    --  Do controller's probe, disable all channels, shutdown internal
    --  oscillator, reset output configuration to default, and disable
    --  listening of SUB* and ALLCALL addresses.
@@ -150,6 +166,7 @@ package A0B.PCA9685.Drivers is
    procedure Configure
      (Self      : in out PCA9685_Controller_Driver'Class;
       Frequency : A0B.Types.Unsigned_16;
+      Finished  : A0B.Callbacks.Callback;
       Success   : in out Boolean);
    --  Configure controller and enable internal oscillator.
    --
