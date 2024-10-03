@@ -491,9 +491,11 @@ package body A0B.PCA9685.Drivers is
 
    begin
       if Self.Status.State /= A0B.I2C.Success then
-         raise Program_Error;
+         Self.State := Initial;
 
-         --  return;
+         A0B.Callbacks.Emit_Once (Self.Finished);
+
+         return;
       end if;
 
       case Self.State is
