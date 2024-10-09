@@ -184,7 +184,7 @@ package body A0B.PCA9685.Drivers is
       end if;
 
       Self.Buffer   := (others => <>);
-      Self.Status   := (State => A0B.I2C.Success, others => <>);
+      Self.Status   := (State => A0B.Success, others => <>);
       Self.Finished := Finished;
 
       Self.On_Initialization;
@@ -347,12 +347,10 @@ package body A0B.PCA9685.Drivers is
    procedure On_Configuration
      (Self : in out PCA9685_Controller_Driver'Class)
    is
-      use type A0B.I2C.Transfer_State;
-
       Success : Boolean := True;
 
    begin
-      if Self.Status.State /= A0B.I2C.Success then
+      if Self.Status.State /= A0B.Success then
          raise Program_Error;
 
          --  return;
@@ -485,12 +483,10 @@ package body A0B.PCA9685.Drivers is
    procedure On_Initialization
      (Self : in out PCA9685_Controller_Driver'Class)
    is
-      use type A0B.I2C.Transfer_State;
-
       Success : Boolean := True;
 
    begin
-      if Self.Status.State /= A0B.I2C.Success then
+      if Self.Status.State /= A0B.Success then
          Self.State := Initial;
 
          A0B.Callbacks.Emit_Once (Self.Finished);
