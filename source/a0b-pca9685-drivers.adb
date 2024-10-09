@@ -107,7 +107,9 @@ package body A0B.PCA9685.Drivers is
    ------------------------
 
    overriding procedure Commit_Transaction
-     (Self : in out PCA9685_Controller_Driver) is
+     (Self     : in out PCA9685_Controller_Driver;
+      Finished : A0B.Callbacks.Callback;
+      Success  : in out Boolean) is
    begin
       if Self.Transaction then
          Self.Transaction := False;
@@ -115,14 +117,13 @@ package body A0B.PCA9685.Drivers is
          declare
             Buffer  : A0B.I2C.Unsigned_8_Array (0 .. 63)
               with Import, Address => Self.Buffer (Self.Buffer'First)'Address;
-            Success : Boolean := True;
 
          begin
             Self.Write
               (Address      => LED0_ON_L_Address,
                Buffer       => Buffer,
                Status       => Self.Status,
-               On_Completed => On_Completed_Callbacks.Create_Callback (Self),
+               On_Completed => Finished,
                Success      => Success);
 
             if not Success then

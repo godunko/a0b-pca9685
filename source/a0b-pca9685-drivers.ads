@@ -182,7 +182,9 @@ package A0B.PCA9685.Drivers is
    --  Start transactional change of the group of the channels.
 
    overriding procedure Commit_Transaction
-     (Self : in out PCA9685_Controller_Driver);
+     (Self     : in out PCA9685_Controller_Driver;
+      Finished : A0B.Callbacks.Callback;
+      Success  : in out Boolean);
    --  Commit transactional change of the group of the channels.
 
    overriding function Tick_Duration

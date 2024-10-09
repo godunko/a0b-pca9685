@@ -6,6 +6,8 @@
 
 --  API of PCA9685 Driver: 16-channel, 12-bit PWM Fm+ I2C-bus LED controller
 
+with A0B.Callbacks;
+
 package A0B.PCA9685 is
 
    pragma Pure;
@@ -46,7 +48,9 @@ package A0B.PCA9685 is
    --  Start transactional change of the group of the channels.
 
    not overriding procedure Commit_Transaction
-     (Self : in out PCA9685_Controller) is abstract;
+     (Self     : in out PCA9685_Controller;
+      Finished : A0B.Callbacks.Callback;
+      Success  : in out Boolean) is abstract;
    --  Commit transactional change of the group of the channels.
 
    not overriding function Tick_Duration
