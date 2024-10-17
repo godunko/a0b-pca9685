@@ -115,7 +115,7 @@ package body A0B.PCA9685.Drivers is
          Self.Transaction := False;
 
          declare
-            Buffer  : A0B.I2C.Unsigned_8_Array (0 .. 63)
+            Buffer  : A0B.Types.Arrays.Unsigned_8_Array (0 .. 63)
               with Import, Address => Self.Buffer (Self.Buffer'First)'Address;
 
          begin
@@ -146,7 +146,7 @@ package body A0B.PCA9685.Drivers is
       use type A0B.Types.Unsigned_16;
 
       MODE        : MODE_Register;
-      MODE_Buffer : A0B.I2C.Unsigned_8_Array (0 .. 1)
+      MODE_Buffer : A0B.Types.Arrays.Unsigned_8_Array (0 .. 1)
         with Import, Address => MODE'Address;
 
    begin
@@ -204,7 +204,7 @@ package body A0B.PCA9685.Drivers is
       Base    : constant A0B.Types.Unsigned_8 :=
         A0B.Types.Unsigned_8 (Self.Channel) * 4 + LED0_ON_L_Address;
       Success : Boolean := True;
-      Buffer  : A0B.I2C.Unsigned_8_Array (0 .. 3)
+      Buffer  : A0B.Types.Arrays.Unsigned_8_Array (0 .. 3)
         with Import, Address => Self.Controller.Buffer (Self.Channel)'Address;
 
    begin
@@ -237,7 +237,7 @@ package body A0B.PCA9685.Drivers is
          LED_ON_H  => (Count => 0, On => False, others => <>),
          LED_OFF_L => (Count => 0),
          LED_OFF_H => (Count => 0, Off => True, others => <>));
-      Buffer  : A0B.I2C.Unsigned_8_Array (0 .. 3)
+      Buffer  : A0B.Types.Arrays.Unsigned_8_Array (0 .. 3)
         with Import, Address => Self.Buffer (Self.Buffer'First)'Address;
       Success : Boolean := True;
 
@@ -273,7 +273,7 @@ package body A0B.PCA9685.Drivers is
 
       Base    : constant A0B.Types.Unsigned_8 :=
         A0B.Types.Unsigned_8 (Self.Channel) * 4 + LED0_ON_L_Address;
-      Buffer  : A0B.I2C.Unsigned_8_Array (0 .. 3)
+      Buffer  : A0B.Types.Arrays.Unsigned_8_Array (0 .. 3)
         with Import, Address => Self.Controller.Buffer (Self.Channel)'Address;
       Success : Boolean := True;
 
@@ -306,7 +306,7 @@ package body A0B.PCA9685.Drivers is
          LED_ON_H  => (Count => 0, On => True, others => <>),
          LED_OFF_L => (Count => 0),
          LED_OFF_H => (Count => 0, Off => False, others => <>));
-      Buffer  : A0B.I2C.Unsigned_8_Array (0 .. 3)
+      Buffer  : A0B.Types.Arrays.Unsigned_8_Array (0 .. 3)
         with Import, Address => Self.Buffer (Self.Buffer'First)'Address;
       Success : Boolean := True;
 
@@ -637,7 +637,7 @@ package body A0B.PCA9685.Drivers is
 
       Base    : constant A0B.Types.Unsigned_8 :=
         A0B.Types.Unsigned_8 (Self.Channel) * 4 + LED0_ON_L_Address;
-      Buffer  : A0B.I2C.Unsigned_8_Array (0 .. 3)
+      Buffer  : A0B.Types.Arrays.Unsigned_8_Array (0 .. 3)
         with Import, Address => Self.Controller.Buffer (Self.Channel)'Address;
       Success : Boolean := True;
 

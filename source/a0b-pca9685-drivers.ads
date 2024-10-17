@@ -9,7 +9,7 @@
 
 with A0B.Callbacks;
 with A0B.I2C.Device_Drivers_8;
-with A0B.Types;
+with A0B.Types.Arrays;
 
 package A0B.PCA9685.Drivers is
 
@@ -135,7 +135,7 @@ package A0B.PCA9685.Drivers is
       Buffer      : Registers.LED_Register_Buffer;
       --  Buffer to prepare values to be send to controller's registers.
 
-      Aux_Buffer  : aliased A0B.I2C.Unsigned_8_Array (0 .. 1);
+      Aux_Buffer  : aliased A0B.Types.Arrays.Unsigned_8_Array (0 .. 1);
       --  Auxiliary buffer for initialization and configuration,
 
       State      : State_Kind := Initial;
